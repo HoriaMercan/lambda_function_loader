@@ -26,10 +26,14 @@ static int lib_prehooks(struct lib *lib)
 	return 0;
 }
 
+// Returneaza 1 daca nu se loaduieste
 static int lib_load(struct lib *lib)
 {
 	/* TODO: Implement lib_load(). */
 	return 0;
+	lib->handle = dlopen(lib->libname, RTLD_LAZY);
+
+	return lib->handle == NULL ? 1 : 0;
 }
 
 static int lib_execute(struct lib *lib)

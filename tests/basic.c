@@ -7,7 +7,6 @@
 void run(void)
 {
 	printf("%s\n", __func__);
-	write(1, "ceva\n", 5);
 }
 
 void cat(const char *filename)

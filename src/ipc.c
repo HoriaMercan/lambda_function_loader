@@ -29,7 +29,7 @@ int connect_socket(int fd)
 	strcpy(server_addr.sun_path, SOCKET_NAME);
 	size_t server_addr_size = sizeof(server_addr);
 
-	printf("try connect\n");
+//	printf("try connect\n");
 	int rc = connect(fd, (struct  sockaddr *)&server_addr, server_addr_size);
 	return rc;
 }

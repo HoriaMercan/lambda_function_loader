@@ -21,6 +21,7 @@
 #define OUTPUT_TEMPLATE "../checker/output/out-XXXXXX"
 #endif
 
+#define FIFO_FILE "/tmp/myfifo"
 #define MAX_FILE_NAME 1000
 
 static int lib_prehooks(struct lib *lib)
@@ -35,15 +36,48 @@ static int lib_load(struct lib *lib)
 	/* TODO: Implement lib_load(). */
 	lib->handle = dlopen(lib->libname, RTLD_LAZY);
 
-	if (lib->handle == NULL)
+	if (lib->handle == NULL) {
+		strcpy(lib->outputfile, OUTPUT_TEMPLATE);
+		int fd = mkstemp(lib->outputfile);
+//
+		close(fd);
+
+		FILE *file_err = fopen(lib->outputfile, "w");
+
+		fprintf(file_err,
+				"Error: %s %s %s could not be executed.\n",
+				lib->libname, lib->funcname, lib->filename);
+
+		fclose(file_err);
+
 		return 1;
+	}
 	if (strlen(lib->filename) == 0) {
 		lib->p_run = NULL;
 		lib->run = dlsym(lib->handle, lib->funcname);
+
 	} else {
 		lib->run = NULL;
 		lib->p_run = dlsym(lib->handle, lib->funcname);
 	}
+
+	if (lib->run == NULL && lib->p_run == NULL) {
+		strcpy(lib->outputfile, OUTPUT_TEMPLATE);
+		int fd = mkstemp(lib->outputfile);
+//
+		close(fd);
+
+		FILE *file_err = fopen(lib->outputfile, "w");
+
+		fprintf(file_err,
+				"Error: %s %s %s could not be executed.\n",
+				lib->libname, lib->funcname, lib->filename);
+
+		fclose(file_err);
+
+		return 1;
+	}
+
 	return 0;
 }
 
@@ -53,16 +87,20 @@ static int lib_execute(struct lib *lib)
 
 
 	lib->outputfile = strdup(OUTPUT_TEMPLATE);
+
+	int fd = mkstemp(lib->outputfile);
+	int out = dup(1);
+	int new_ = dup2(fd, 1);
+	if (new_ != fd)
+		close(fd);
+
+	// aici faci FORK
 	pid_t pid = fork();
 	DIE(pid < 0, "fork esuat lamentabil");
 	if (pid == 0) {
-		printf("Child: %d\n", pid);
-		int fd = mkstemp(lib->outputfile);
-		printf("current fd: %d\n", fd);
-		int out = dup(1);
-		int new_ = dup2(fd, 1);
-		if (new_ != fd)
-			close(fd);
+//		printf("Child: %d\n", pid);
+//		printf("current fd: %d\n", fd);
+
 //		printf("new_ = %d\n", new_);
 		if (lib->run) {
 			lib->run();
@@ -70,24 +108,32 @@ static int lib_execute(struct lib *lib)
 			lib->p_run(lib->filename);
 		}
 
-		dup2(out, new_);
-		close(out);
 
-		return 0;
+		exit(0);
 	}
 	else {
-		printf("Parent: %d\n", pid);
+
+//		printf("Parent: %d\n", pid);
 		int status;
 		waitpid(pid, &status, 0);
 		if (WIFEXITED(status)) {
-			char *error = strerror(WEXITSTATUS(status));
-			printf("%s\n", error);
+			int exit_status = WEXITSTATUS(status);
+			if (exit_status != 0) {
+				char *error = strerror(exit_status);
+				printf("%s\n", error);
+			}
+			if (exit_status == 0)
+				return 0;
 		}
-		if (WIFSIGNALED(status)) {
-			char *signal = strsignal(WEXITSTATUS(status));
-			printf("%s\n", signal);
-		}
-	};
+//		if (WIFSIGNALED(status)) {
+//			char *signal = strsignal(WEXITSTATUS(status));
+//			printf("Error: %s could not be executed\n", lib->funcname);
+//		}
+
+	}
+	dup2(out, new_);
+	close(out);
+
 
 	return 0;
 }
@@ -139,12 +185,16 @@ static int parse_command(const char *buf, char *name, char *func, char *params)
 
 	switch (ret) {
 		case 1:
-			strcpy(func, "");
+			strcpy(func, "run");
 		case 2:
 			strcpy(params, "");
 	}
 
 	return ret;
+}
+
+int spawn_process(int client_socket) {
+
 }
 
 int main(void)

@@ -20,6 +20,8 @@
 #define OUTPUT_TEMPLATE "../checker/output/out-XXXXXX"
 #endif
 
+#define MAX_FILE_NAME 1000
+
 static int lib_prehooks(struct lib *lib)
 {
 	/* TODO: Implement lib_prehooks(). */
@@ -30,21 +32,63 @@ static int lib_prehooks(struct lib *lib)
 static int lib_load(struct lib *lib)
 {
 	/* TODO: Implement lib_load(). */
-	return 0;
 	lib->handle = dlopen(lib->libname, RTLD_LAZY);
 
-	return lib->handle == NULL ? 1 : 0;
+	if (lib->handle == NULL)
+		return 1;
+	if (strlen(lib->filename) == 0) {
+		lib->p_run = NULL;
+		lib->run = dlsym(lib->handle, lib->funcname);
+	} else {
+		lib->run = NULL;
+		lib->p_run = dlsym(lib->handle, lib->funcname);
+	}
+	return 0;
 }
 
 static int lib_execute(struct lib *lib)
 {
 	/* TODO: Implement lib_execute(). */
+
+
+	lib->outputfile = strdup(OUTPUT_TEMPLATE);
+	int fd = mkstemp(lib->outputfile);
+	pid_t pid = fork();
+	DIE(pid < 0, "fork esuat lamentabil");
+	if (pid == 0) {
+
+		int new_out = dup2(fd, STDOUT_FILENO);
+		if (new_out != fd) {
+			close(fd);
+		}
+		if (lib->run) {
+			lib->run();
+		} else {
+			lib->p_run(lib->filename);
+		}
+
+		close(new_out);
+		return 0;
+	}
+	else {
+		int status;
+		waitpid(pid, &status, 0);
+		if (WIFEXITED(status)) {
+			char *error = strerror(WEXITSTATUS(status));
+			printf("%s\n", error);
+		}
+		if (WIFSIGNALED(status)) {
+			char *signal = strsignal(WEXITSTATUS(status));
+		}
+	}
+
 	return 0;
 }
 
 static int lib_close(struct lib *lib)
 {
 	/* TODO: Implement lib_close(). */
+	dlclose(lib->handle);
 	return 0;
 }
 
@@ -56,6 +100,7 @@ static int lib_posthooks(struct lib *lib)
 
 static int lib_run(struct lib *lib)
 {
+
 	int err;
 
 	err = lib_prehooks(lib);
@@ -85,6 +130,13 @@ static int parse_command(const char *buf, char *name, char *func, char *params)
 	if (ret < 0)
 		return -1;
 
+	switch (ret) {
+		case 1:
+			strcpy(func, "");
+		case 2:
+			strcpy(params, "");
+	}
+
 	return ret;
 }
 
@@ -97,6 +149,7 @@ int main(void)
 
 	server_addr.sun_family = AF_UNIX;
 	strcpy(server_addr.sun_path, SOCKET_NAME);
+	remove(SOCKET_NAME);
 	size_t server_addr_size = sizeof(server_addr);
 
 	int bindret = bind(fd, (struct sockaddr *)&server_addr, server_addr_size);
@@ -107,24 +160,39 @@ int main(void)
 	int ret;
 	struct lib lib;
 
+	lib.libname = malloc(MAX_FILE_NAME);
+	lib.filename = malloc(MAX_FILE_NAME);
+	lib.funcname = malloc(MAX_FILE_NAME);
+	lib.outputfile = malloc(MAX_FILE_NAME);
+
+
 	while (1) {
 		/* TODO - get message from client */
 
-		int clen = sizeof(client_addr);
+		unsigned int clen = sizeof(client_addr);
 		int client_socket = accept(fd, (struct sockaddr *) &client_addr, &clen);
 		if (client_socket == -1)
 			continue;
-//		printf("%d\n", client_socket);
-		int size = 0;
-		while (size == 0) {
-			size = recv(client_socket, buf, 1024, 0);
-		}
-		strcpy(buf, "ana are mere");
+		int size = recv(client_socket, buf, 1024, 0);
+
+		buf[size] = 0;
+		/* TODO - parse message with parse_command and populate lib */
+		parse_command(buf, lib.libname, lib.funcname, lib.filename);
+		/* TODO - handle request from client */
+
+		ret = lib_run(&lib);
+//		printf("message: return value %d\n", ret);
+//		switch (ret) {
+//			case 0:
+//				sprintf(buf, "Output file: %s\n", lib.outputfile);
+//				break;
+//			default:
+//				sprintf(buf, "Error: %s\n", lib.outputfile);
+//
+//		}
+		sprintf(buf, "%s\n", lib.outputfile);
 
 		write(client_socket, buf, 1024);
-		/* TODO - parse message with parse_command and populate lib */
-		/* TODO - handle request from client */
-		ret = lib_run(&lib);
 	}
 
 	return 0;

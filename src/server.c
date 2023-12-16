@@ -146,16 +146,19 @@ static int lib_execute(struct lib *lib)
 		if (WIFEXITED(status)) {
 			int exit_status = WEXITSTATUS(status);
 			if (exit_status != 0) {
-				char *error = strerror(exit_status);
-				printf("%s\n", error);
+
+				printf("Exit: %d\n", exit_status);
 			}
-			if (exit_status == 0)
-				return 0;
+
+			return 0;
 		}
-//		if (WIFSIGNALED(status)) {
-//			char *signal = strsignal(WEXITSTATUS(status));
-//			printf("Error: %s could not be executed\n", lib->funcname);
-//		}
+		if (status) {
+			char *signal = strsignal(status);
+			FILE *file = fopen(lib->outputfile, "w");
+			fprintf(file, "Error: %s could not be executed. Signal: %s\n",
+				   lib->funcname, signal);
+			fclose(file);
+		}
 
 	}
 	dup2(out, new_);
@@ -284,9 +287,6 @@ int main(void)
 		if (pid == 0) {
 			spawn_process(client_socket, buf, lib);
 			exit(0);
-		} else {
-			int status;
-//			waitpid(pid, &status, 0);
 		}
 	}
 

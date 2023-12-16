@@ -10,6 +10,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <sys/wait.h>
 
 #include "ipc.h"
 #include "server.h"
@@ -52,25 +53,30 @@ static int lib_execute(struct lib *lib)
 
 
 	lib->outputfile = strdup(OUTPUT_TEMPLATE);
-	int fd = mkstemp(lib->outputfile);
 	pid_t pid = fork();
 	DIE(pid < 0, "fork esuat lamentabil");
 	if (pid == 0) {
-
-		int new_out = dup2(fd, STDOUT_FILENO);
-		if (new_out != fd) {
+		printf("Child: %d\n", pid);
+		int fd = mkstemp(lib->outputfile);
+		printf("current fd: %d\n", fd);
+		int out = dup(1);
+		int new_ = dup2(fd, 1);
+		if (new_ != fd)
 			close(fd);
-		}
+//		printf("new_ = %d\n", new_);
 		if (lib->run) {
 			lib->run();
 		} else {
 			lib->p_run(lib->filename);
 		}
 
-		close(new_out);
+		dup2(out, new_);
+		close(out);
+
 		return 0;
 	}
 	else {
+		printf("Parent: %d\n", pid);
 		int status;
 		waitpid(pid, &status, 0);
 		if (WIFEXITED(status)) {
@@ -79,8 +85,9 @@ static int lib_execute(struct lib *lib)
 		}
 		if (WIFSIGNALED(status)) {
 			char *signal = strsignal(WEXITSTATUS(status));
+			printf("%s\n", signal);
 		}
-	}
+	};
 
 	return 0;
 }
@@ -181,18 +188,11 @@ int main(void)
 		/* TODO - handle request from client */
 
 		ret = lib_run(&lib);
-//		printf("message: return value %d\n", ret);
-//		switch (ret) {
-//			case 0:
-//				sprintf(buf, "Output file: %s\n", lib.outputfile);
-//				break;
-//			default:
-//				sprintf(buf, "Error: %s\n", lib.outputfile);
-//
-//		}
-		sprintf(buf, "%s\n", lib.outputfile);
 
+		sprintf(buf, "%s\n", lib.outputfile);
 		write(client_socket, buf, 1024);
+		close(client_socket);
+
 	}
 
 	return 0;

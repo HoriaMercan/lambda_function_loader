@@ -11,7 +11,11 @@
 #include <sys/un.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <semaphore.h>
+#include <sys/prctl.h>
 
+#include <ctype.h>
+#include <pthread.h>
 #include "ipc.h"
 #include "server.h"
 
@@ -24,10 +28,23 @@
 #define FIFO_FILE "/tmp/myfifo"
 #define MAX_FILE_NAME 1000
 
+pthread_mutex_t mutex;
+pthread_mutexattr_t attr;
+
+sem_t sem;
+
 static int lib_prehooks(struct lib *lib)
 {
 	/* TODO: Implement lib_prehooks(). */
 	return 0;
+}
+
+char *rtrim(char *s)
+{
+	char* back = s + strlen(s);
+	while(isspace(*--back));
+	*(back+1) = '\0';
+	return s;
 }
 
 // Returneaza 1 daca nu se loaduieste
@@ -44,9 +61,14 @@ static int lib_load(struct lib *lib)
 
 		FILE *file_err = fopen(lib->outputfile, "w");
 
-		fprintf(file_err,
+		if (strlen(lib->filename))
+			fprintf(file_err,
 				"Error: %s %s %s could not be executed.\n",
 				lib->libname, lib->funcname, lib->filename);
+		else
+			fprintf(file_err,
+					"Error: %s %s could not be executed.\n",
+					lib->libname, lib->funcname);
 
 		fclose(file_err);
 
@@ -69,9 +91,14 @@ static int lib_load(struct lib *lib)
 
 		FILE *file_err = fopen(lib->outputfile, "w");
 
-		fprintf(file_err,
-				"Error: %s %s %s could not be executed.\n",
-				lib->libname, lib->funcname, lib->filename);
+		if (strlen(lib->filename))
+			fprintf(file_err,
+					"Error: %s %s %s could not be executed.\n",
+					lib->libname, lib->funcname, lib->filename);
+		else
+			fprintf(file_err,
+					"Error: %s %s could not be executed.\n",
+					lib->libname, lib->funcname);
 
 		fclose(file_err);
 
@@ -190,15 +217,37 @@ static int parse_command(const char *buf, char *name, char *func, char *params)
 			strcpy(params, "");
 	}
 
+	rtrim(params);
+	rtrim(func);
+
 	return ret;
 }
 
-int spawn_process(int client_socket) {
+int spawn_process(int client_socket, char *buf, struct lib lib) {
+	pthread_mutex_lock(&mutex);
+	int size = recv(client_socket, buf, 1024, 0);
+	pthread_mutex_unlock(&mutex);
+	buf[size] = 0;
+	/* TODO - parse message with parse_command and populate lib */
+	parse_command(buf, lib.libname, lib.funcname, lib.filename);
+	/* TODO - handle request from client */
 
+	lib_run(&lib);
+
+	sprintf(buf, "%s\n", lib.outputfile);
+	write(client_socket, buf, 1024);
+	close(client_socket);
 }
 
 int main(void)
 {
+
+	sem_init(&sem, 1, 1);
+
+	pthread_mutexattr_init(&attr);
+	pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
+
+	pthread_mutex_init(&mutex, &attr);
 	/* TODO: Implement server connection. */
 	int fd = socket(AF_UNIX, SOCK_STREAM, 0);
 	struct sockaddr_un server_addr;
@@ -230,19 +279,15 @@ int main(void)
 		int client_socket = accept(fd, (struct sockaddr *) &client_addr, &clen);
 		if (client_socket == -1)
 			continue;
-		int size = recv(client_socket, buf, 1024, 0);
 
-		buf[size] = 0;
-		/* TODO - parse message with parse_command and populate lib */
-		parse_command(buf, lib.libname, lib.funcname, lib.filename);
-		/* TODO - handle request from client */
-
-		ret = lib_run(&lib);
-
-		sprintf(buf, "%s\n", lib.outputfile);
-		write(client_socket, buf, 1024);
-		close(client_socket);
-
+		pid_t pid = fork();
+		if (pid == 0) {
+			spawn_process(client_socket, buf, lib);
+			exit(0);
+		} else {
+			int status;
+//			waitpid(pid, &status, 0);
+		}
 	}
 
 	return 0;
